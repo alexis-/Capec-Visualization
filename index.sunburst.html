@@ -1,0 +1,198 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+
+
+<html>
+
+<head>
+	<title>CAPEC Visualization</title>
+	<script src="https://d3js.org/d3.v3.min.js"></script>
+  <style>
+    path {
+      stroke: #fff;
+    }
+  </style>
+</head>
+
+<body>
+	<script>
+  /*
+  auth = btoa('username:password');
+  body = "{"statements":[{"statement": "MATCH p=((:Category)<-[:CHILD_OF]-(:AttackPattern)<-[:CHILD_OF*]-(:AttackPattern)) RETURN p", "resultDataContents":["graph"]}]}";
+  
+  var request = $.ajax({
+    type: "POST",
+    url: "http://localhost:7474/db/data/transaction/commit",
+    accepts: { json: "application/json" },
+    dataType: "json",
+    contentType:"application/json",
+    authorization: auth,
+    data: JSON.stringify(body),
+    //now pass a callback to success to do something with the data
+    success: function (data) {
+    }
+  });*/
+	</script>
+  
+	<script>
+  function computeSize(node, value, traversed) {
+    var newNode = { name: node.name, children: [] }
+    var toTraverse = [];
+    
+    for (var i = 0; i < node.children.length; i++) {
+      sNode = node.children[i];
+      
+      if (traversed.indexOf(sNode) == -1) {
+        toTraverse.push(sNode);
+        traversed.push(sNode);
+      }
+    }
+    
+    if (toTraverse.length == 0)
+      newNode.value = value;
+    
+    else {
+      value += toTraverse.length;
+      
+      for (var i = 0; i < toTraverse.length; i++) {
+        newNode.children.push(computeSize(toTraverse[i], value, traversed));
+      }
+    }
+    
+    return newNode;
+  }
+  
+  function formatJson(json) {
+    var node_map = {};
+    var data = json.results[0].data;
+    
+    for (var idx_g = 0; idx_g < data.length; idx_g++) {
+      var nodes = data[idx_g].graph.nodes;
+      var rss = data[idx_g].graph.relationships;
+      
+      for (var idx_n = 0; idx_n < nodes.length; idx_n++) {
+        var n = nodes[idx_n];
+        var obj = {
+          name: n.properties.name,
+          children: [],
+          parent: []
+        };
+        
+        if (n.id in node_map == false)
+          node_map[n.id] = obj;
+      }
+      
+      for (var idx_r = 0; idx_r < rss.length; idx_r++) {
+        var rs = rss[idx_r];
+        
+        var sNode = node_map[rs.startNode];
+        var eNode = node_map[rs.endNode];
+        
+        eNode.children.push(sNode);
+        sNode.parent.push(eNode);
+      }
+    }
+    
+    var root = { name: "Capec", children: new Array() };
+    
+    for (var key in node_map) {
+      node = node_map[key];
+      
+      if (node.parent.length == 0)
+        root.children.push(node);
+    }
+    
+    root = computeSize(root, 0, []);
+    root.value = 200;
+    
+    return root;
+  }
+    
+  var width = 8000,
+      height = 8000,
+      radius = (Math.min(width, height) / 2) - 10;
+
+  var formatNumber = d3.format(",d");
+
+  var x = d3.scale.linear()
+      .range([0, 2 * Math.PI]);
+
+  var y = d3.scale.sqrt()
+      .range([0, radius]);
+
+  var color = d3.scale.category20c();
+
+  var partition = d3.layout.partition();
+
+  var radius = Math.min(width, height) / 2;
+  var arc = d3.svg.arc()
+      .startAngle(function(d) { return Math.max(0, Math.min(2 * Math.PI, x(d.x))); })
+      .endAngle(function(d) { return Math.max(0, Math.min(2 * Math.PI, x(d.x + d.dx))); })
+      .innerRadius(function(d) { return radius * (d.y)*(d.y) * 1.7; })
+      .outerRadius(function(d) { return radius * (d.y + d.dy)*(d.y + d.dy) * 1.7; });
+      /*.innerRadius(function(d) { return Math.max(0, y(d.y)) / 2; })
+      .outerRadius(function(d) { return Math.max(0, y(d.y + d.dy)); });*/
+
+  var svg = d3.select("body").append("svg")
+      .attr("width", width)
+      .attr("height", height)
+    .append("g")
+      .attr("transform", "translate(" + width / 2 + "," + (height / 2) + ")");
+  
+  // Computes the label angle of an arc, converting from radians to degrees.
+  function angle(d) {
+    var a = (arc.startAngle()(d) + arc.endAngle()(d)) * 90 / Math.PI - 90;
+    return a > 90 ? a - 180 : a;
+  };
+  
+  function isVisible(d) {
+    return Math.abs(arc.startAngle()(d) - arc.endAngle()(d)) > 0.011;
+  }
+    
+  d3.json("https://raw.githubusercontent.com/alexis-/Capec-Visualization/master/capec_v2.10.json", function(error, data) {
+    if (error) throw error;
+    
+    root = formatJson(data);
+
+    var g = svg.selectAll("path")
+        .data(partition.nodes(root))
+        .enter().append("g");
+    
+    g.append("path")
+        .attr("d", arc)
+        .style("fill", function(d) { return color((d.children ? d : d.parent).name); })
+        .on("click", click)
+      .append("title")
+        .text(function(d) { return d.name + "\n" + formatNumber(d.value); });
+    g.append("text")
+        .attr("dy", ".35em")
+        .attr("text-anchor", "middle")
+        .attr("text-size", "3em")
+        .attr("transform", function(d) { return "translate(" + arc.centroid(d) + ")rotate(" + angle(d) + ")"; })
+        .style("display", function(d) { return isVisible(d) ? "block" : "none"; })
+        .text(function(d) { return d.name == "Capec" ? "" : d.name; });
+
+  });
+
+  function click(d) {
+    t = svg.transition()
+        .duration(750)
+        .tween("scale", function() {
+          var xd = d3.interpolate(x.domain(), [d.x, d.x + d.dx]),
+              yd = d3.interpolate(y.domain(), [d.y, 1]),
+              yr = d3.interpolate(y.range(), [d.y ? 20 : 0, radius]);
+          return function(t) { x.domain(xd(t)); y.domain(yd(t)).range(yr(t)); };
+        });
+      t.selectAll("path")
+        .attrTween("d", function(d) { return function() { return arc(d); }; })
+      t.selectAll("text")
+        .attrTween("transform", function(d) { return function() { return "translate(" + arc.centroid(d) + ")rotate(" + angle(d) + ")"; } })
+        .styleTween("display", function(d) { return function() { return isVisible(d) ? "block" : "none"; } });
+  }
+
+  d3.select(self.frameElement).style("height", height + "px");
+
+  </script>
+</body>
+
+</html>
